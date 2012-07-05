@@ -14,26 +14,10 @@ INCLUDE_RE = re.compile(r"""
     ([a-zA-Z0-9:]+)     # Name of module - letters, numbers, colons
 """, re.VERBOSE | re.MULTILINE)
 
-def isiterable(var):
-    """Returns whether var is a type that can be iterated through.
-
-    >>> isiterable(5)
-    False
-    >>> isiterable([1, 2, 3])
-    True
-    """
-    try:
-        x = iter(var)
-        return True
-    except TypeError, e:
-        return False
-
 def some(f, seq):
     """Returns the first result of apply f to an element of seq for which the
     result is not false (in the loose Python sense).
 
-    >>> some(isiterable, [1, [2], 3])
-    True
     >>> some(lambda x: x % 2, [2, 4, 6, 3, 8, 9])
     1
     """
@@ -43,49 +27,29 @@ def some(f, seq):
             return fx
     return None
 
-def first_rest(seq):
-    """Splits an iterator or list into a tuple containing the first element
-    and the rest of the list.
-
-    If at the end of the list already, returns None.
-
-    >>> first_rest([0, 1, 2, 3, 4])
-    (0, [1, 2, 3, 4])
-    >>> first_rest([])
-
-    """
-    try:
-        first = seq[0]
-    except TypeError:
-        try:
-            return (next(seq), seq)
-        except StopIteration:
-            return None
-        except TypeError, e:
-            raise TypeError, "Not a list or iterator: {}".format(str(e))
-    except IndexError:
-        return None
-        
-    return (first, seq[1:])
-
-def flatten(x):
+def flatten(l, ltypes=(list, tuple)):
     """Flattens a multi-dimensional sequence.
+
+    Taken from http://rightfootin.blogspot.co.uk/2006/09/more-on-python-flatten.html.
 
     >>> flatten([1, 2, 3, 4])
     [1, 2, 3, 4]
     >>> flatten([1, [2, 3], 4, [5, [6], 7]])
     [1, 2, 3, 4, 5, 6, 7]
     """
-    if isiterable(x):
-        split = first_rest(x)
-
-        if split:
-            first, rest = split
-            return flatten(first) + flatten(rest)
-        else:
-            return []
-    else:
-        return [x]
+    ltype = type(l)
+    l = list(l)
+    i = 0
+    while i < len(l):
+        while isinstance(l[i], ltypes):
+            if not l[i]:
+                l.pop(i)
+                i -= 1
+                break
+            else:
+                l[i:i + 1] = l[i]
+        i += 1
+    return ltype(l)
 
 def extract_includes(script):
     """Given a string representing Perl code, returns a set of module names
@@ -122,6 +86,7 @@ def find_bins(path, paths, on_broken_include=lambda x: x, processed=set(), broke
     broken module). You can then use this to throw an error or report the
     problem.
     """
+#    print("Reading {}".format(path))
     processed.add(path)
     
     script = open(path, "r").read()
@@ -139,8 +104,8 @@ def find_bins(path, paths, on_broken_include=lambda x: x, processed=set(), broke
                          None) - processed
 
     return ([path] if has_find_bin else []) + \
-        flatten(find_bins(p, paths, on_broken_include, processed, broken_seen) for \
-                     p in include_paths)
+        flatten([find_bins(p, paths, on_broken_include, processed, broken_seen) for \
+                    p in include_paths])
 
 def main():
     parser = argparse.ArgumentParser(description="Finds instances of FindBin")
@@ -157,8 +122,17 @@ def main():
     else:
         def report_broken_module(module_name):
             print("Unable to locate {}".format(module_name), file=sys.stderr)
-        files = find_bins(args.path, args.libs, report_broken_module)
-        map(print, files)
+        files = set(find_bins(args.path, args.libs, report_broken_module))
+        if not files:
+            print("No script uses FindBin")
+        else:
+            files.remove(args.path)
+            if not files:
+                print("Only parent script contains FindBin")
+            else:
+                print("Following files contain FindBin:")
+                for f in files:
+                    print("\t{}".format(f))
 
 if __name__ == '__main__':
     main()
